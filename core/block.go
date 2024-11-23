@@ -2,96 +2,85 @@ package core
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/binary"
+	"encoding/gob"
+	"fmt"
 	"io"
 
+	"github.com/Daniel-Rammirez/blockchain/crypto"
 	"github.com/Daniel-Rammirez/blockchain/types"
 )
 
 type Header struct {
-	Version   uint32
-	PrevBlock types.Hash
-	Timestamp int64
-	Height    uint32
-	Nonce     uint64
-}
-
-func writeBinary(w io.Writer, data interface{}) error {
-	return binary.Write(w, binary.LittleEndian, data)
-}
-
-func readBinary(r io.Reader, data interface{}) error {
-	return binary.Read(r, binary.LittleEndian, data)
-}
-
-func (h *Header) EncodeBinary(w io.Writer) error {
-	fields := []interface{}{h.Version, h.PrevBlock, h.Timestamp, h.Height, h.Nonce}
-
-	for _, field := range fields {
-		if err := writeBinary(w, field); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (h *Header) DecodeBinary(r io.Reader) error {
-	fields := []interface{}{&h.Version, &h.PrevBlock, &h.Timestamp, &h.Height, &h.Nonce}
-
-	for _, field := range fields {
-		if err := readBinary(r, field); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	Version       uint32
+	DataHash      types.Hash
+	PrevBlockHash types.Hash
+	Timestamp     int64
+	Height        uint32
 }
 
 type Block struct {
-	Header
+	*Header
 	Transaction []Transaction
+	Validator   crypto.PublicKey
+	Signature   *crypto.Signature
 
 	// Cached version of the header hash
 	hash types.Hash
 }
 
-func (b *Block) Hash() types.Hash {
-	buf := &bytes.Buffer{}
-	b.Header.EncodeBinary(buf)
+func NewBlock(h *Header, txx []Transaction) *Block {
+	return &Block{
+		Header:      h,
+		Transaction: txx,
+	}
+}
+
+func (b *Block) Sign(privKey crypto.PrivateKey) error {
+	sign, err := privKey.Sign(b.HeaderData())
+	if err != nil {
+		return err
+	}
+
+	b.Validator = privKey.PublicKey()
+	b.Signature = sign
+
+	return nil
+}
+
+func (b *Block) Verify() error {
+	if b.Signature == nil {
+		return fmt.Errorf("block has not signature")
+	}
+
+	if !b.Signature.Verify(b.Validator, b.HeaderData()) {
+		return fmt.Errorf("block has invalid signature")
+	}
+
+	return nil
+}
+
+func (b *Block) Decode(r io.Reader, dec Decoder[*Block]) error {
+	return dec.Decode(r, b)
+}
+
+func (b *Block) Encode(w io.Writer, enc Encoder[*Block]) error {
+	return enc.Encode(w, b)
+}
+
+func (b *Block) Hash(hasher Hasher[*Block]) types.Hash {
 
 	if b.hash.IsZero() {
-		b.hash = types.Hash(sha256.Sum256(buf.Bytes()))
+		b.hash = hasher.Hash(b)
 	}
 
 	return b.hash
 }
 
-func (b *Block) EncodeBinary(w io.Writer) error {
+func (b *Block) HeaderData() []byte {
+	buf := &bytes.Buffer{}
+	enc := gob.NewEncoder(buf)
 
-	if err := b.Header.EncodeBinary(w); err != nil {
-		return err
-	}
-	for _, tx := range b.Transaction {
-		if err := tx.EncodeBinary(w); err != nil {
-			return err
-		}
-	}
+	enc.Encode(b.Header)
 
-	return nil
-}
-
-func (b *Block) DecodeBinary(r io.Reader) error {
-	if err := b.Header.DecodeBinary(r); err != nil {
-		return err
-	}
-
-	for _, tx := range b.Transaction {
-		if err := tx.DecodeBinary(r); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return buf.Bytes()
 }
