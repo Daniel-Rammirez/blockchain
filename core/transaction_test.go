@@ -27,7 +27,7 @@ func TestVerifyTransaction(t *testing.T) {
 
 	assert.Nil(t, tx.Signature)
 	assert.Nil(t, tx.Sign(privKey))
-	assert.NotNil(t, tx.PublicKey)
+	assert.NotNil(t, tx.From)
 	assert.NotNil(t, tx.Signature)
 	assert.Nil(t, tx.Verify())
 
@@ -35,10 +35,21 @@ func TestVerifyTransaction(t *testing.T) {
 	otherPrivKey := crypto.GeneratePrivateKey()
 	// and then we tamper the existing tx
 	// trying to hack the system
-	tx.PublicKey = otherPrivKey.PublicKey()
+	tx.From = otherPrivKey.PublicKey()
 
 	// this must be not nil, bc should throw an error
 	// the reason s we have a sig with anohter pubKey
 	assert.NotNil(t, tx.Verify())
 
+}
+
+func randomTxWithSignature(t *testing.T) *Transaction {
+	privKey := crypto.GeneratePrivateKey()
+	tx := &Transaction{
+		Data: []byte("foo"),
+	}
+
+	assert.Nil(t, tx.Sign(privKey))
+
+	return tx
 }
